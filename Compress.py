@@ -1,3 +1,7 @@
+'''
+Functions for data compression
+Return compression time and compression ratio
+'''
 import gzip
 import shutil
 import lz4.frame
@@ -5,7 +9,6 @@ import zstandard as zstd
 import os
 import time
 
-# Create the output directory if it doesn't exist
 output_dir = '../compressed_data/'
 os.makedirs(output_dir, exist_ok=True)
 
