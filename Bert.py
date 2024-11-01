@@ -12,18 +12,18 @@ import warnings
 warnings.filterwarnings("ignore")
 
 ###############################################
-file_path = '../data/train_40k.csv'
-temp_csv_path = '../temp/temp_train_40k.csv'
-decompress_file_path = '../decompress/temp_train_40k.csv'
-output_file_path = '../Output/mask.csv'
-results_file_path = '../Output/compression_results.csv'  # File to save results
-
 column_name = 'Text'
 model_name = "bert-base-uncased"  
 mask_token = "[MASK]"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.mask_token = mask_token
 row = 0
+
+file_path = '../data/train_40k.csv'
+temp_csv_path = '../temp/temp_train_40k.csv'
+decompress_file_path = '../decompress/temp_train_40k.csv'
+output_file_path = '../Output/mask.csv'
+results_file_path = '../Output/compression_results.csv'  # File to save results
 ################################################
 
 def random_mask(text, mask_percentage=0.2):

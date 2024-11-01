@@ -19,14 +19,13 @@ model_name = "Roberta-base"
 mask_token = "<mask>"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.mask_token = mask_token
-nrows = [100]
+nrows = [5000, 10000, 20000, 40000]
 row = 0
 
 
 file_path = '../data/train_40k_text.csv'
 temp_csv_path = '../temp/temp_train_40k_text.csv'
 decompress_file_path = '../decompress/temp_train_40k.csv'
-output_file_path = f'../Output/mask_{model_name}_text.csv'
 ################################################
 
 def random_mask(text, mask_percentage=0.2):
@@ -88,19 +87,56 @@ def decompress_file(file_path, method='gzip'):
     elif method == 'zstd':
         decompress_zstd(file_path)
 
+# def predict_mask(text, fill_mask_pipeline):
+#     global row
+#     row += 1
+#     if row % 100 == 0:
+#         print(f'Predicting {row} row.')
+#     masked_words = text.split(mask_token)
+#     predictions = []
+    
+#     for i in range(len(masked_words) - 1):
+#         input_text = masked_words[i] + mask_token + masked_words[i + 1]
+#         results = fill_mask_pipeline(input_text)
+        
+#         predicted_word = results[0]['token_str'] 
+#         predictions.append(predicted_word)
+
+#     # Reconstruct the original text with predictions
+#     reconstructed_text = ''
+#     for i in range(len(masked_words) - 1):
+#         reconstructed_text += masked_words[i]
+#         reconstructed_text += predictions[i] 
+#     reconstructed_text += masked_words[-1]
+
+#     return reconstructed_text
+
 def predict_mask(text, fill_mask_pipeline):
     global row
     row += 1
     if row % 100 == 0:
         print(f'Predicting {row} row.')
+    
+    # Split the text by the mask token
     masked_words = text.split(mask_token)
     predictions = []
-    
+
+    # Iterate over the parts and predict
     for i in range(len(masked_words) - 1):
+        # Construct the input text with the mask in between
         input_text = masked_words[i] + mask_token + masked_words[i + 1]
-        results = fill_mask_pipeline(input_text)
-        
-        predicted_word = results[0]['token_str'] 
+
+        # Tokenize and truncate the input to fit model's max length
+        input_tokens = tokenizer.tokenize(input_text)
+        if len(input_tokens) > 512:
+            input_tokens = input_tokens[:512]  # Truncate to 512 tokens
+        truncated_input = tokenizer.convert_tokens_to_string(input_tokens)
+
+        # Use the fill-mask pipeline to get predictions
+        results = fill_mask_pipeline(truncated_input)
+
+        # Extract the predicted word
+        predicted_word = results[0]['token_str'] if results else ""
         predictions.append(predicted_word)
 
     # Reconstruct the original text with predictions
@@ -108,10 +144,11 @@ def predict_mask(text, fill_mask_pipeline):
     for i in range(len(masked_words) - 1):
         reconstructed_text += masked_words[i]
         reconstructed_text += predictions[i] 
-    reconstructed_text += masked_words[-1]
+    reconstructed_text += masked_words[-1]  # Append the last part
 
     return reconstructed_text
 
+# Function to count masks and differences
 def count_masks_and_differences(original_text, masked_text, predicted_text):
     original_words = original_text.split()
     masked_words = masked_text.split()
@@ -131,7 +168,12 @@ def count_masks_and_differences(original_text, masked_text, predicted_text):
 
 def main():
     for nrow in nrows:
+
+        ###########################################
+        output_file_path = f'../Output/mask_{nrow}.csv'
         results_file_path = f'../Output/results_{model_name}_{nrow}.csv'  
+        ###########################################
+
         data = pd.read_csv(file_path, nrows=nrow)
         original = pd.read_csv('../data/train_40k_text.csv')
         original_texts = original[column_name].copy()
@@ -146,7 +188,7 @@ def main():
         print("Temp CSV file created successfully.")
 
         # List of compression methods
-        compression_methods = ['gzip']
+        compression_methods = ['gzip', 'lz4', 'zstd']
         
         # Store results for the original file
         original_compression_results = []
@@ -196,8 +238,54 @@ def main():
                 total_masks += masks_count
                 total_differences += differences_count
 
+            end = time.time()
+            
+            elapsed_time = end - start
+            print("Mask prediction completed in {:.2f} seconds.".format(elapsed_time))
+
+            # Print total masks and differences
             print(f"Total masks: {total_masks}")
             print(f"Total different predicted words: {total_differences}")
+
+            # Save the updated DataFrame with predictions
+            decompressed_data.to_csv(output_file_path.replace('.csv', f'_{method}.csv'), index=False)  # Save output for each method
+
+            # Display the updated DataFrame with comparisons
+            print(decompressed_data[[column_name, "Predict_" + column_name]].head())
+            
+            # Store the compression results for the temporary CSV along with prediction time
+            compression_results.append({
+                'method': method,
+                'compress_time': compress_time,
+                'compression_ratio': compression_ratio,
+                'prediction_time': elapsed_time,
+                'total masks': total_masks,
+                'total differences': total_differences
+            })
+        
+        # Summary of compression results for the original file
+        print("\nOriginal File Compression Results:")
+        for result in original_compression_results:
+            print(f"Method: {result['method']}, Compress Time: {result['compress_time']:.2f} seconds, Compression Ratio: {result['compression_ratio']:.2f}")
+
+        # Summary of compression results for the temporary CSV
+        print("\nTemporary CSV Compression Results:")
+        for result in compression_results:
+            print(f"Method: {result['method']}, Compress Time: {result['compress_time']:.2f} seconds, Compression Ratio: {result['compression_ratio']:.2f}, Prediction Time: {result['prediction_time']:.2f} seconds")
+
+        # Save all results to a CSV file
+        all_results = []
+
+        for result in original_compression_results:
+            all_results.append({**result, 'file_type': 'original'})
+
+        for result in compression_results:
+            all_results.append({**result, 'file_type': 'temporary'})
+
+        results_df = pd.DataFrame(all_results)
+        results_df.to_csv(results_file_path, index=False)
+        print(f"\nAll results saved to {results_file_path}")
+
 
 if __name__ == "__main__":
     main()
