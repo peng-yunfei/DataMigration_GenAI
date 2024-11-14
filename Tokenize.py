@@ -6,14 +6,14 @@ from Compress import compress_zstd, compress_lz4, compress_gzip
 
 warnings.filterwarnings("ignore")
 
-file_path = "../data/DS_001.csv"
-output_path = "../data/tokenized_DS_001.csv"
+file_path = "../data/unlabeled_150k.csv"
+output_path = "../data/tokenized_unlabeled_150k.csv"
 loop_time = 5
-text_column = "Content"
+text_column = "Text"
 
 def tokenize(file_path, text_column):
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    df = pd.read_csv(file_path, sep='|')
+    df = pd.read_csv(file_path)
 
     start_time = time.time()
     df[text_column] = df[text_column].apply(lambda x: tokenizer.encode(x, return_tensors="pt").tolist())
@@ -57,7 +57,7 @@ def compress(file_path, text_column):
 
 
 def main():
-    # tokenize(file_path, text_column)
+    tokenize(file_path, text_column)
     compress(file_path, text_column)
     compress(output_path, text_column)
 

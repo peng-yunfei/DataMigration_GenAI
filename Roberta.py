@@ -19,7 +19,10 @@ model_name = "Roberta-base"
 mask_token = "<mask>"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.mask_token = mask_token
-nrows = [5000, 10000, 20000, 40000]
+# nrows = [1000, 5000, 10000]
+nrows = [5000]
+# tops = [3, 5, 10]
+tops = [10]
 row = 0
 
 
@@ -56,7 +59,7 @@ def mask_top_tfidf_words(texts, top_n=10):
     top_words = {feature_names[i]: mask_token for i in top_indices}
 
     # Print the top words with their TF-IDF scores
-    print("Top 10 TF-IDF Words:")
+    print(f"Top {top_n} TF-IDF Words:")
     for word in top_words.keys():
         print(word)
 
@@ -68,6 +71,44 @@ def mask_top_tfidf_words(texts, top_n=10):
         masked_texts.append(text)
 
     return masked_texts  
+
+"""
+mask words with top10 frequency
+"""
+def mask_top_frequent_words(texts, top_n=10):
+    if not texts or all(t.isspace() for t in texts):
+        return texts
+
+    # Preprocess texts: remove punctuation and normalize
+    processed_texts = [re.sub(r'[^\w\s]', '', text.lower()) for text in texts]
+
+    # Count word frequencies
+    word_freq = {}
+    for text in processed_texts:
+        for word in text.split():
+            if word not in word_freq:
+                word_freq[word] = 1
+            else:
+                word_freq[word] += 1
+
+    # Get top N most frequent words
+    top_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    top_words = {word: mask_token for word, _ in top_words}
+
+    # Print the top words with their frequencies
+    print("Top 10 Most Frequent Words:")
+    for word, freq in sorted(word_freq.items(), key=lambda x: x[1], reverse=True)[:top_n]:
+        print(f"{word}: {freq}")
+
+    # Mask the top words in each text
+    masked_texts = []
+    for text in texts:
+        lower_text = text.lower()
+        for word in top_words.keys():
+            lower_text = re.sub(r'\b' + re.escape(word) + r'\b', mask_token, lower_text)
+        masked_texts.append(lower_text)
+
+    return masked_texts
 
 def compress_file(file_path, method='gzip'):
     if method == 'gzip':
@@ -168,123 +209,124 @@ def count_masks_and_differences(original_text, masked_text, predicted_text):
 
 def main():
     for nrow in nrows:
+        for top in tops:
 
-        ###########################################
-        output_file_path = f'../Output/mask_{nrow}.csv'
-        results_file_path = f'../Output/results_{model_name}_{nrow}.csv'  
-        ###########################################
+            ###########################################
+            output_file_path = f'../Output/mask_freq_top{top}_{nrow}rows.csv'
+            results_file_path = f'../Output/results_freq_top{top}_{nrow}rows.csv'  
+            ###########################################
 
-        data = pd.read_csv(file_path, nrows=nrow)
-        original = pd.read_csv('../data/train_40k_text.csv')
-        original_texts = original[column_name].copy()
-        print('original text: ', original_texts.head(10))
-        data = data[data[column_name].str.split().str.len() > 10]
+            data = pd.read_csv(file_path, nrows=nrow)
+            original = pd.read_csv('../data/train_40k_text.csv')
+            original_texts = original[column_name].copy()
+            # print('original text: ', original_texts.head(10))
+            data = data[data[column_name].str.split().str.len() > 10]
 
-        # Mask the text in the DataFrame using the top 10 TF-IDF words for the whole column
-        data[column_name] = mask_top_tfidf_words(data[column_name].tolist())
-        
-        # Save the temporary CSV file
-        data.to_csv(temp_csv_path, index=False)
-        print("Temp CSV file created successfully.")
-
-        # List of compression methods
-        compression_methods = ['gzip', 'lz4', 'zstd']
-        
-        # Store results for the original file
-        original_compression_results = []
-
-        # Compress the original file
-        for method in compression_methods:
-            original_compress_time, original_compression_ratio = compress_file(file_path, method=method)
-            print(f"Original file compressed using {method} in {original_compress_time:.2f} seconds with a compression ratio of {original_compression_ratio:.2f}.")
+            # Mask the text in the DataFrame using the top 10 frequency words for the whole column
+            data[column_name] = mask_top_frequent_words(data[column_name].tolist(), top_n=top)
             
-            # Store the results for the original file
-            original_compression_results.append({
-                'method': method,
-                'compress_time': original_compress_time,
-                'compression_ratio': original_compression_ratio
-            })
+            # Save the temporary CSV file
+            data.to_csv(temp_csv_path, index=False)
+            print("Temp CSV file created successfully.")
 
-        # Store results for the temporary CSV file
-        compression_results = []
-
-        # Proceed with compressing the temporary CSV file
-        for method in compression_methods:
-            global row
-            row = 0
-            compress_time, compression_ratio = compress_file(temp_csv_path, method=method)
-            print(f"Temp file compressed using {method} in {compress_time:.2f} seconds with a compression ratio of {compression_ratio:.2f}.")
-
-            decompressed_data = pd.read_csv(temp_csv_path)
-
-            # Setup the mask prediction pipeline
-            # print('mask token: ', tokenizer.mask_token)
-            fill_mask_pipeline = pipeline("fill-mask", model=model_name, tokenizer=tokenizer, device=0)
-
-            # Fill the masks in the Text column
-            print(f"Mask predicting for {method}...")
-            start = time.time()
-
-            # Initialize counters
-            total_masks = 0
-            total_differences = 0
-
-            # Apply prediction and count masks and differences
-            decompressed_data["Predict_" + column_name] = decompressed_data[column_name].apply(lambda text: predict_mask(text, fill_mask_pipeline))
-
-            # Calculate total masks and differences
-            for original, masked, predicted in zip(original_texts, decompressed_data[column_name], decompressed_data["Predict_" + column_name]):
-                masks_count, differences_count = count_masks_and_differences(original, masked, predicted)
-                total_masks += masks_count
-                total_differences += differences_count
-
-            end = time.time()
+            # List of compression methods
+            compression_methods = ['gzip', 'lz4', 'zstd']
             
-            elapsed_time = end - start
-            print("Mask prediction completed in {:.2f} seconds.".format(elapsed_time))
+            # Store results for the original file
+            original_compression_results = []
 
-            # Print total masks and differences
-            print(f"Total masks: {total_masks}")
-            print(f"Total different predicted words: {total_differences}")
+            # Compress the original file
+            for method in compression_methods:
+                original_compress_time, original_compression_ratio = compress_file(file_path, method=method)
+                print(f"Original file compressed using {method} in {original_compress_time:.2f} seconds with a compression ratio of {original_compression_ratio:.2f}.")
+                
+                # Store the results for the original file
+                original_compression_results.append({
+                    'method': method,
+                    'compress_time': original_compress_time,
+                    'compression_ratio': original_compression_ratio
+                })
 
-            # Save the updated DataFrame with predictions
-            decompressed_data.to_csv(output_file_path.replace('.csv', f'_{method}.csv'), index=False)  # Save output for each method
+            # Store results for the temporary CSV file
+            compression_results = []
 
-            # Display the updated DataFrame with comparisons
-            print(decompressed_data[[column_name, "Predict_" + column_name]].head())
+            # Proceed with compressing the temporary CSV file
+            for method in compression_methods:
+                global row
+                row = 0
+                compress_time, compression_ratio = compress_file(temp_csv_path, method=method)
+                print(f"Temp file compressed using {method} in {compress_time:.2f} seconds with a compression ratio of {compression_ratio:.2f}.")
+
+                decompressed_data = pd.read_csv(temp_csv_path)
+
+                # Setup the mask prediction pipeline
+                # print('mask token: ', tokenizer.mask_token)
+                fill_mask_pipeline = pipeline("fill-mask", model=model_name, tokenizer=tokenizer, device=0)
+
+                # Fill the masks in the Text column
+                print(f"Mask predicting for {method}...")
+                start = time.time()
+
+                # Initialize counters
+                total_masks = 0
+                total_differences = 0
+
+                # Apply prediction and count masks and differences
+                decompressed_data["Predict_" + column_name] = decompressed_data[column_name].apply(lambda text: predict_mask(text, fill_mask_pipeline))
+
+                # Calculate total masks and differences
+                for original, masked, predicted in zip(original_texts, decompressed_data[column_name], decompressed_data["Predict_" + column_name]):
+                    masks_count, differences_count = count_masks_and_differences(original, masked, predicted)
+                    total_masks += masks_count
+                    total_differences += differences_count
+
+                end = time.time()
+                
+                elapsed_time = end - start
+                print("Mask prediction completed in {:.2f} seconds.".format(elapsed_time))
+
+                # Print total masks and differences
+                print(f"Total masks: {total_masks}")
+                print(f"Total different predicted words: {total_differences}")
+
+                # Save the updated DataFrame with predictions
+                decompressed_data.to_csv(output_file_path.replace('.csv', f'_{method}.csv'), index=False)  # Save output for each method
+
+                # Display the updated DataFrame with comparisons
+                print(decompressed_data[[column_name, "Predict_" + column_name]].head())
+                
+                # Store the compression results for the temporary CSV along with prediction time
+                compression_results.append({
+                    'method': method,
+                    'compress_time': compress_time,
+                    'compression_ratio': compression_ratio,
+                    'prediction_time': elapsed_time,
+                    'total masks': total_masks,
+                    'total differences': total_differences
+                })
             
-            # Store the compression results for the temporary CSV along with prediction time
-            compression_results.append({
-                'method': method,
-                'compress_time': compress_time,
-                'compression_ratio': compression_ratio,
-                'prediction_time': elapsed_time,
-                'total masks': total_masks,
-                'total differences': total_differences
-            })
-        
-        # Summary of compression results for the original file
-        print("\nOriginal File Compression Results:")
-        for result in original_compression_results:
-            print(f"Method: {result['method']}, Compress Time: {result['compress_time']:.2f} seconds, Compression Ratio: {result['compression_ratio']:.2f}")
+            # Summary of compression results for the original file
+            print("\nOriginal File Compression Results:")
+            for result in original_compression_results:
+                print(f"Method: {result['method']}, Compress Time: {result['compress_time']:.2f} seconds, Compression Ratio: {result['compression_ratio']:.2f}")
 
-        # Summary of compression results for the temporary CSV
-        print("\nTemporary CSV Compression Results:")
-        for result in compression_results:
-            print(f"Method: {result['method']}, Compress Time: {result['compress_time']:.2f} seconds, Compression Ratio: {result['compression_ratio']:.2f}, Prediction Time: {result['prediction_time']:.2f} seconds")
+            # Summary of compression results for the temporary CSV
+            print("\nTemporary CSV Compression Results:")
+            for result in compression_results:
+                print(f"Method: {result['method']}, Compress Time: {result['compress_time']:.2f} seconds, Compression Ratio: {result['compression_ratio']:.2f}, Prediction Time: {result['prediction_time']:.2f} seconds")
 
-        # Save all results to a CSV file
-        all_results = []
+            # Save all results to a CSV file
+            all_results = []
 
-        for result in original_compression_results:
-            all_results.append({**result, 'file_type': 'original'})
+            for result in original_compression_results:
+                all_results.append({**result, 'file_type': 'original'})
 
-        for result in compression_results:
-            all_results.append({**result, 'file_type': 'temporary'})
+            for result in compression_results:
+                all_results.append({**result, 'file_type': 'temporary'})
 
-        results_df = pd.DataFrame(all_results)
-        results_df.to_csv(results_file_path, index=False)
-        print(f"\nAll results saved to {results_file_path}")
+            results_df = pd.DataFrame(all_results)
+            results_df.to_csv(results_file_path, index=False)
+            print(f"\nAll results saved to {results_file_path}")
 
 
 if __name__ == "__main__":
